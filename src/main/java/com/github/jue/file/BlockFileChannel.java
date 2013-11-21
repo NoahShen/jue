@@ -37,13 +37,22 @@ public class BlockFileChannel {
 	/**
 	 * 默认的文件块大小
 	 */
-	public static final int DEFAULT_BLOCK_SIZE = 4096;
+	public static final int DEFAULT_BLOCK_SIZE = 64 * 1024 * 1024;//64MB
 
+	/**
+	 * 文件
+	 */
+	private File file;
+	
 	/**
 	 * 文件Channel对象
 	 */
 	private FileChannel fileChannel;
 	
+	/**
+	 * checksum文件
+	 */
+	private File blockChecksumFile;
 	/**
 	 * 存储block块的校验码的文件
 	 */
@@ -146,11 +155,13 @@ public class BlockFileChannel {
 	 */
 	public BlockFileChannel(File file, int blockSize, boolean blockCache, ChecksumGenerator checksumGenerator) {
 		try {
+			this.file = file;
 			@SuppressWarnings("resource")
 			RandomAccessFile raf = new RandomAccessFile(file, "rw");
 			this.fileChannel = raf.getChannel();
 			
 			File blockchkFile = new File(getChecksumFilename(file.getAbsolutePath()));
+			this.blockChecksumFile = blockchkFile;
 			@SuppressWarnings("resource")
 			RandomAccessFile blockchkFileRaf = new RandomAccessFile(blockchkFile, "rw");
 			this.blockChecksumChannel = blockchkFileRaf.getChannel();
@@ -184,6 +195,14 @@ public class BlockFileChannel {
 		blockChecksumChannel.close();
 	}
 
+	/**
+	 * 删除文件
+	 * @throws IOException
+	 */
+	public void deleteFiles() throws IOException {
+		this.file.delete();
+		this.blockChecksumFile.delete();
+	}
 	/**
 	 * 返回文件大小
 	 * 

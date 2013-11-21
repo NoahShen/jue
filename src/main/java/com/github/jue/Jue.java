@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
@@ -16,6 +18,11 @@ import com.github.jue.bplustree.BNode;
 import com.github.jue.bplustree.BPlusTree;
 import com.github.jue.bplustree.CopyOnWriteBPlusTree;
 import com.github.jue.bplustree.DefaultBPlusTree;
+import com.github.jue.compression.DataCompress;
+import com.github.jue.compression.gzip.GZipDataCompress;
+import com.github.jue.compression.lzw.LZWDataCompress;
+import com.github.jue.compression.quicklz.QuickLZDataCompress;
+import com.github.jue.compression.zlib.ZlibDataCompress;
 import com.github.jue.doc.DocObject;
 import com.github.jue.exception.RevisionInvalidException;
 import com.github.jue.file.ADrop;
@@ -92,6 +99,8 @@ public class Jue {
 	private File file;
 	
 	private boolean closed;
+	
+	private Map<Byte, DataCompress> compresses = new HashMap<Byte, DataCompress>();
 	/**
 	 * 打开或者创建Jue
 	 * @param filePath
@@ -106,6 +115,10 @@ public class Jue {
 	 * @param config
 	 */
 	public Jue(String filePath, FileConfig config) {
+		compresses.put(FileConfig.GZIP, new GZipDataCompress());
+		compresses.put(FileConfig.LZW, new LZWDataCompress());
+		compresses.put(FileConfig.QUICKLZ, new QuickLZDataCompress());
+		compresses.put(FileConfig.ZLIB, new ZlibDataCompress());
 		init(filePath, config);
 	}
 
@@ -114,7 +127,7 @@ public class Jue {
 	 * @param filePath
 	 * @param config
 	 */
-	private void init(String filePath, FileConfig config) {
+	private void init(String filePath, FileConfig config) {		
 		file = new File(filePath);
 		boolean exist = file.exists();
 		try {
@@ -261,6 +274,37 @@ public class Jue {
 	}
 	
 	/**
+	 * Put一个Doc对象，忽略该版本要求，merge为false，不合并旧数据
+	 * @param key
+	 * @param docObj
+	 * @return
+	 */
+	public int put(String key, DocObject docObj) {	
+		return put(key, docObj, -1, false);
+	}
+	
+	/**
+	 * Put一个Doc对象，忽略该版本要求
+	 * @param key
+	 * @param docObj
+	 * @param merge
+	 * @return
+	 */
+	public int put(String key, DocObject docObj, boolean merge) {	
+		return put(key, docObj, -1, merge);
+	}
+	
+	/**
+	 * Put一个Doc对象，merge为false，不合并旧数据
+	 * @param key
+	 * @param docObj
+	 * @param requireRev
+	 * @return
+	 */
+	public int put(String key, DocObject docObj, int requireRev) {	
+		return put(key, docObj, requireRev, false);
+	}
+	/**
 	 * Put一个Doc对象，如果版本号小于零，那么就忽略该版本要求，如果merge为true，则新数据与旧数据合并
 	 * @param key 主键
 	 * @param docObj 文档对象
@@ -310,7 +354,11 @@ public class Jue {
 			long writePos = blockFileChannel.size();
 			ByteDynamicArray byteArray = new ByteDynamicArray();
 			// 添加ValueRecord
-			ValueRecord valueRecord = DocUtils.docObjToValueRecord(deleted, docObj, rev);
+			DataCompress compress = null;
+			if (fileHeader.getValueCompressed() != ADrop.FALSE_BYTE) {
+				compress = compresses.get(fileHeader.getCompressionCodec());
+			}
+			ValueRecord valueRecord = DocUtils.docObjToValueRecord(deleted, docObj, rev, compress);
 			ByteBuffer vRecBuffer = dropTransfer.valueRecordToByteBuffer(valueRecord);
 			// ValueRec的写入位置
 			long valuePos = writePos;
@@ -550,19 +598,16 @@ public class Jue {
 	 * 读取文档对象
 	 * @param valuePos
 	 * @return
-	 * @throws IOException
-	 * @throws ChecksumException
+	 * @throws Exception 
 	 */
-	private DocObject readDocObj(long valuePos) throws IOException, ChecksumException {
+	private DocObject readDocObj(long valuePos) throws Exception {
 		// 从文件读取ValueRecord
 		ValueRecord valueRecord = dropTransfer.readValueRecord(valuePos);
-		if (!valueRecord.isDeleted()) {// 数据存在
-			byte[] values = valueRecord.getValue();
-			String valueStr = new String(values, JueConstant.CHARSET);
-			DocObject docObj = new DocObject(valueStr);
-			return docObj;
+		DataCompress compress = null;
+		if (fileHeader.getValueCompressed() != ADrop.FALSE_BYTE) {
+			compress = compresses.get(fileHeader.getCompressionCodec());
 		}
-		return null;
+		return DocUtils.valueRecordToDocObj(valueRecord, compress);
 	}
 	/**
 	 * 删除key对应文档对象
@@ -573,7 +618,7 @@ public class Jue {
 		try {
 			byte[] keyBytes = key.getBytes(JueConstant.CHARSET);			
 			if (keyBytes.length > MAX_KEY_LENGTH) {
-				throw new IllegalArgumentException("key length must less than 64KB, actul:" + keyBytes.length);
+				throw new IllegalArgumentException("key length must less than 64KB, actual:" + keyBytes.length);
 			}
 			writeLock.lock();
 			int currentRev = getCurrentRev(key);
@@ -737,8 +782,17 @@ public class Jue {
 
 	/**
 	 * 关闭文件
+	 * @param deleteFiles
 	 */
 	public void close() {
+		close(false);
+	}
+
+	/**
+	 * 关闭文件，deleteFiles为true，则删除文件
+	 * @param deleteFiles
+	 */
+	public void close(boolean deleteFiles) {
 		lock();
 		try {
 			keyTree = null;
@@ -747,9 +801,12 @@ public class Jue {
 			fileTail = null;
 			dropTransfer = null;
 			blockFileChannel.close();
+			if (deleteFiles) {
+				blockFileChannel.deleteFiles();
+			}
 			blockFileChannel = null;
 			cache.clear();
-			closed = false;
+			closed = true;
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		} finally {

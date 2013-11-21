@@ -13,7 +13,7 @@ public class FileConfig {
 	/**
 	 * 默认的文件块大小
 	 */
-	public static final int DEFAULT_BLOCK_SIZE = 4096;
+	public static final int DEFAULT_BLOCK_SIZE = 64 * 1024 * 1024;//64MB
 
 	/**
 	 * 默认的树的最小数关键字数
