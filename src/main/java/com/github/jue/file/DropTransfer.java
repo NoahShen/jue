@@ -37,7 +37,7 @@ public class DropTransfer {
 	 * @throws IOException
 	 */
 	public ByteBuffer headerToByteBuffer(FileHeader header) {
-		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_LENGHT);		
+		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_SIZE);		
 		
 		buffer.putLong(header.getFileTail());
 		buffer.putInt(header.getKeyTreeMin());
@@ -181,7 +181,7 @@ public class DropTransfer {
 	 * @throws IOException 
 	 */
 	public FileHeader readHeader() throws IOException, ChecksumException {
-		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_LENGHT);
+		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_SIZE);
 		blockChannel.read(buffer, 0, true);
 		buffer.flip();
 		long fileTail = buffer.getLong();

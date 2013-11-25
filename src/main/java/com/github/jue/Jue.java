@@ -159,7 +159,7 @@ public class Jue {
 	 * @throws IOException
 	 */
 	private FileHeader readHeader(File file, FileConfig config) throws IOException {
-		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_LENGHT);
+		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_SIZE);
 		FileChannel readChannel = null;
 		try {
 			readChannel = new RandomAccessFile(file, "r").getChannel();
@@ -670,9 +670,9 @@ public class Jue {
 			compactBlockChannel.write(buffer, 0);
 			
 			// 写入位置
-			long realWritePos = FileHeader.HEADER_LENGHT;
+			long realWritePos = FileHeader.HEADER_SIZE;
 			// 文件元素的写入位置
-			long dropWritePos = FileHeader.HEADER_LENGHT;
+			long dropWritePos = FileHeader.HEADER_SIZE;
 			BPlusTree<String, Long> compactKeyTree = new DefaultBPlusTree<String, Long>(keyTree.getM());
 			ByteDynamicArray dataArray = new ByteDynamicArray();
 			BPlusTree.Entry<String, Long>[] enties = keyTree.entryArray();

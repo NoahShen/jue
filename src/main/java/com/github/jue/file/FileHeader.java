@@ -18,7 +18,7 @@ public class FileHeader implements ADrop {
 	/**
 	 * FileHeader的长度
 	 */
-	public static final int HEADER_LENGHT = 22;
+	public static final int HEADER_SIZE = 22;
 	
 	/**
 	 * 文件尾的位置
