@@ -61,4 +61,11 @@ public class ByteUtil {
 		buffer.flip();
 		return buffer.getLong();
 	}
+	
+	public static byte[] getBytesFromBuffer(ByteBuffer buffer) {
+		int size = buffer.remaining();
+		byte[] bytes = new byte[size];
+		buffer.get(bytes);
+		return bytes;
+	}
 }

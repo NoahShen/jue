@@ -4,7 +4,6 @@
 package com.github.jue.file;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
@@ -13,6 +12,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
 
+import com.github.jue.util.ByteDynamicArray;
+import com.github.jue.util.ByteUtil;
 import com.github.jue.util.ConcurrentLRUCache;
 
 /**
@@ -25,6 +26,7 @@ public class AODataSyncFile {
 	 * 最大缓存数
 	 */
 	public static final int DEFAULT_MAX_CACHE_CAPACITY = 100000;
+	
 	/**
 	 * 默认的文件块大小
 	 */
@@ -33,7 +35,7 @@ public class AODataSyncFile {
 	/**
 	 * 默认新数据的缓冲区大小
 	 */
-	public static final int DEFAULT_NEW_DATA_BUFFER_SIZE = 512 * 1024 * 1024; //512MB
+	public static final int DEFAULT_MAX_DATA_BUFFER_SIZE = 512 * 1024 * 1024; //512MB
 	
 	/**
 	 * 文件
@@ -57,19 +59,24 @@ public class AODataSyncFile {
 	private final boolean blockCache;
 	
 	/**
-	 * 缓存
+	 * 缓存，使用ByteDynamicArray，而不是ByteBuffer,因为ByteBuffer线程不安全
 	 */
-	private ConcurrentLRUCache<Long, ByteBuffer> cache;
+	private ConcurrentLRUCache<Long, ByteDynamicArray> cache;
+	
+	/**
+	 * 最大缓冲区的大小限制
+	 */
+	private int maxDataBufferSize;
 	
 	/**
 	 * 新写入数据的缓存
 	 */
-	private ByteBuffer dataBuffer;
+	private ByteDynamicArray dataBufferDArray;
 	
 	/**
 	 * 头文件的缓存
 	 */
-	private ByteBuffer headerBuffer;
+	private ByteDynamicArray headerBufferDArray;
 
 	/**
 	 * 缓存锁
@@ -86,8 +93,11 @@ public class AODataSyncFile {
 	 */
 	private final WriteLock writeBufferLock = bufferLock.writeLock();
 	
-	
+	/**
+	 * 写文件的策略
+	 */
 	private SyncBuffterStrategy syncStrategy;
+
 	
 	/**
 	 * 创建AODataSyncFile
@@ -96,24 +106,29 @@ public class AODataSyncFile {
 	 * @param blockCache
 	 * @param maxCacheCapacity
 	 * @param newDataBufferSize
-	 * @throws FileNotFoundException
+	 * @throws IOException
 	 */
-	public AODataSyncFile(File file, int blockSize, boolean blockCache, int maxCacheCapacity, int newDataBufferSize) throws FileNotFoundException {
+	public AODataSyncFile(File file, int blockSize, boolean blockCache, int maxCacheCapacity, int maxDataBufferSize) throws IOException {
 		super();
 		this.file = file;
+		boolean newFile = !file.exists();
 		@SuppressWarnings("resource")
 		RandomAccessFile raf = new RandomAccessFile(file, "rw");
+		if (newFile) {
+			byte[] emptyHeader = new byte[FileHeader.HEADER_SIZE];
+			raf.write(emptyHeader);
+		}
 		this.fileChannel = raf.getChannel();
 		this.blockSize = blockSize;
 		this.blockCache = blockCache;
 		if (blockCache) {
-			cache = new ConcurrentLRUCache<Long, ByteBuffer>(maxCacheCapacity);
+			cache = new ConcurrentLRUCache<Long, ByteDynamicArray>(maxCacheCapacity);
 		}
-		dataBuffer = ByteBuffer.allocate(newDataBufferSize);
-		dataBuffer.flip();// position:0,limit:0
-		headerBuffer = ByteBuffer.allocate(FileHeader.HEADER_SIZE);
+		this.maxDataBufferSize = maxDataBufferSize;
+		this.dataBufferDArray = new ByteDynamicArray(maxDataBufferSize);
+		this.headerBufferDArray = new ByteDynamicArray(FileHeader.HEADER_SIZE);
 		
-		syncStrategy = new SyncBuffterStrategy();
+		this.syncStrategy = new SyncBuffterStrategy();
 	}
 
 	/**
@@ -122,7 +137,7 @@ public class AODataSyncFile {
 	 * @throws IOException 
 	 */
 	public long size() throws IOException {
-		return fileChannel.size() + dataBuffer.limit();
+		return fileChannel.size() + dataBufferDArray.size();
 	}
 	
 	public File getFile() {
@@ -139,7 +154,7 @@ public class AODataSyncFile {
 	
 	/**
 	 * 写入数据，返回写入的地址
-	 * @param dataBuffer
+	 * @param dataBufferDArray
 	 * @return 写入的地址
 	 * @throws IOException
 	 */
@@ -157,40 +172,40 @@ public class AODataSyncFile {
 	 * @throws IOException 
 	 */
 	private void writeBufferToFile() throws IOException {
-		dataBuffer.rewind();
-		headerBuffer.rewind();
+		ByteBuffer writeDataBuffer = ByteBuffer.wrap(dataBufferDArray.getOrginalBytes(), 0, dataBufferDArray.size());
 		long writePos = fileChannel.size();
-		fileChannel.write(dataBuffer, writePos);
-		dataBuffer.clear().flip();
-		fileChannel.write(headerBuffer, 0);
-		headerBuffer.clear();
+		fileChannel.write(writeDataBuffer, writePos);
+		dataBufferDArray.clear();
+		
+		ByteBuffer writeHeaderBuffer = ByteBuffer.wrap(headerBufferDArray.getOrginalBytes(), 0, headerBufferDArray.size());
+		fileChannel.write(writeHeaderBuffer, 0);
+		headerBufferDArray.clear();
 	}
 	
 	/**
 	 * 将新数据写入缓存
 	 * @param newHeaderBuffer
 	 * @param newDataBuffer
-	 * @return
+	 * @return 返回新数据的写入地址
 	 * @throws IOException
 	 */
 	private long writeDataToBuffer(ByteBuffer newHeaderBuffer, ByteBuffer newDataBuffer) throws IOException {
-		long writePos = this.size();
+		long newDataPos = this.size();
 		int size = newDataBuffer.remaining();
+		this.dataBufferDArray.add(ByteUtil.getBytesFromBuffer(newDataBuffer));
 
-		int newPos = this.dataBuffer.limit();
-		this.dataBuffer.limit(newPos + size);
-		this.dataBuffer.position(newPos);
-		this.dataBuffer.put(newDataBuffer);
+		this.headerBufferDArray = new ByteDynamicArray(ByteUtil.getBytesFromBuffer(newHeaderBuffer));
 
-		this.headerBuffer.clear();
-		this.headerBuffer.put(newHeaderBuffer);
-
-		clearBlockCache(writePos, size);
-		return writePos;
+		clearBlockCache(newDataPos, size);
+		return newDataPos;
 	}
 	
+	/**
+	 * // 清空缓存
+	 * @param pos
+	 * @param size
+	 */
 	private void clearBlockCache(long pos, int size) {
-		// 清空缓存
 		if (blockCache) {
 			long[] blockIdxs = getBlockIndexes(pos, size);
 			for (int i = 0; i < blockIdxs.length; ++i) {
@@ -223,6 +238,97 @@ public class AODataSyncFile {
 		}
 		return indexes;
 	}
+
+
+	/**
+	 * 读取数据到buffer中
+	 * @param readBuffer
+	 * @param position
+	 * @return
+	 * @throws IOException
+	 */
+	public int read(ByteBuffer readBuffer, long position) throws IOException {
+		if (position < FileHeader.HEADER_SIZE) {
+			throw new IllegalArgumentException("position must >= file header size:" + FileHeader.HEADER_SIZE);
+		}
+		readBufferLock.lock();
+		try	{
+			// 文件大小，包括之前写入的缓存
+			long allFileSize = size();
+			if (allFileSize == 0) {
+				return -1;
+			}
+			if (position >= allFileSize) {
+				throw new IllegalArgumentException("position must < file size[" + allFileSize + "]!");
+			}
+			// 最大读取的数据量
+			int readSize = readBuffer.remaining();
+			// 读取的数据长度
+			int count = 0;
+			// 获取需要读取的数据对应的文件块的位置
+			long[] blockIndexes = getBlockIndexes(position, readSize);
+			for (int i = 0; i < blockIndexes.length; ++i) {
+				ByteDynamicArray blockDataDArray = getBlockData(blockIndexes[i]);
+				int readPos = 0;
+				if (i == 0) {
+					// 移除头部后的相对位置
+					long removedHeaderPos = position - FileHeader.HEADER_SIZE;
+					// 第一个数据块，可能只读取部分数据
+					readPos = (int) (removedHeaderPos % blockSize);
+				}
+				count += blockDataDArray.read(readBuffer, readPos);
+			}
+			return count;
+		} finally {
+			readBufferLock.unlock();
+		}
+	}
+
+	
+	/**
+	 * 读取相应的文件块
+	 * @param blockIndex
+	 * @param checksum
+	 * @return
+	 * @throws IOException
+	 */
+	private ByteDynamicArray getBlockData(long blockIndex) throws IOException {
+		ByteDynamicArray readBlockData = null;
+		// 从缓存中获取该文件块
+		if (blockCache) {
+			readBlockData = cache.get(blockIndex);
+			if (readBlockData != null) {
+				return readBlockData;
+			}
+		}
+		// 缓存中不存在该块，从文件及缓冲区中读取
+		ByteBuffer readBlockBuffer = ByteBuffer.allocate(blockSize);
+		// 已经读取的字节数
+		int ct = 0;
+		do {
+			long readPos = FileHeader.HEADER_SIZE + blockIndex * blockSize + ct;
+			long fileSize = fileChannel.size();
+			int n = 0;
+			if (readPos < fileSize) {
+				n = fileChannel.read(readBlockBuffer, readPos);
+			} else {
+				int posInBuffer = (int) (readPos - fileSize);
+				n = this.dataBufferDArray.read(readBlockBuffer, posInBuffer);
+				if (n == 0) {
+					break;
+				}
+			}
+			ct += n;
+		} while (ct < blockSize);// 直到读满一个文件块的容量
+		
+		readBlockBuffer.flip();
+		byte[] bytes = ByteUtil.getBytesFromBuffer(readBlockBuffer);
+		readBlockData = new ByteDynamicArray(bytes);
+		if (blockCache) {
+			cache.put(blockIndex, readBlockData);
+		}
+		return readBlockData;
+	}
 	
 	public void close() throws IOException {
 		writeBufferLock.lock();
@@ -231,8 +337,8 @@ public class AODataSyncFile {
 			fileChannel.close();
 			cache.clear();
 			cache = null;
-			dataBuffer.clear();
-			headerBuffer.clear();
+			dataBufferDArray.clear();
+			headerBufferDArray.clear();
 		} finally {
 			writeBufferLock.unlock();
 		}
@@ -248,12 +354,12 @@ public class AODataSyncFile {
 		public long append(ByteBuffer newHeaderBuffer, ByteBuffer newDataBuffer) throws IOException {
 			// 需要写入的数据长度
 			int dataSize = newDataBuffer.remaining();
-			if (dataSize > AODataSyncFile.this.dataBuffer.capacity()) {
-				throw new IllegalArgumentException("The new data size is bigger than databuffer capacity!");
+			if (dataSize > AODataSyncFile.this.maxDataBufferSize) {
+				throw new IllegalArgumentException("The new data size can't be bigger than max data buffer size!");
 			}
 			
 			// 超出缓存最大限制，先写入磁盘
-			if (AODataSyncFile.this.dataBuffer.limit() + dataSize > AODataSyncFile.this.dataBuffer.capacity()) {
+			if (AODataSyncFile.this.dataBufferDArray.size() + dataSize > AODataSyncFile.this.maxDataBufferSize) {
 				writeBufferToFile();
 			}
 			return writeDataToBuffer(newHeaderBuffer, newDataBuffer);
