@@ -128,7 +128,7 @@ public class AODataSyncFile {
 		this.dataBufferDArray = new ByteDynamicArray(maxDataBufferSize);
 		this.headerBufferDArray = new ByteDynamicArray(FileHeader.HEADER_SIZE);
 		
-		this.syncStrategy = new SyncAlwaysStrategy();
+		this.syncStrategy = new SyncEverySecStrategy();
 	}
 
 	/**
@@ -416,6 +416,42 @@ public class AODataSyncFile {
 			}
 			long pos =  writeDataToBuffer(newHeaderBuffer, newDataBuffer);
 			writeBufferToFile();
+			return pos;
+		}
+
+		@Override
+		public void close() throws IOException {
+			writeBufferToFile();
+		}
+	}
+	
+	/**
+	 * 每秒写入一次数据。
+	 * @author noah
+	 *
+	 */
+	public class SyncEverySecStrategy implements SyncStrategy {
+		
+		private long lastWriteTime;
+		
+		private static final long ONE_SECOND = 1000;
+		
+		@Override
+		public long append(ByteBuffer newHeaderBuffer, ByteBuffer newDataBuffer) throws IOException {			
+			// 需要写入的数据长度
+			int dataSize = newDataBuffer.remaining();
+			if (dataSize > AODataSyncFile.this.maxDataBufferSize) {
+				throw new IllegalArgumentException("The new data size can't be bigger than max data buffer size!");
+			}
+			
+			long escaped = System.currentTimeMillis() - lastWriteTime;
+			// 距离上次写入时间超过1秒，或者超出缓存最大限制，先写入磁盘
+			if (escaped > ONE_SECOND 
+					|| AODataSyncFile.this.dataBufferDArray.size() + dataSize > AODataSyncFile.this.maxDataBufferSize) {
+				writeBufferToFile();
+			}
+			long pos =  writeDataToBuffer(newHeaderBuffer, newDataBuffer);
+			lastWriteTime = System.currentTimeMillis();
 			return pos;
 		}
 

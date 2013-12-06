@@ -30,8 +30,8 @@ public class AODataSyncFileTest {
 	@After
 	public void tearDown() throws Exception {
 		aoDataSyncFile.close();
-//		File file = new File("/tmp/AODataSyncFile");
-//		file.delete();
+		File file = new File("/tmp/AODataSyncFile");
+		file.delete();
 	}
 	
 	//@Test
