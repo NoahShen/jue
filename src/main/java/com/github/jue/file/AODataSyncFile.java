@@ -23,9 +23,9 @@ import com.github.jue.util.ConcurrentLRUCache;
  */
 public class AODataSyncFile {
 	/**
-	 * 最大缓存数
+	 * 默认最大缓存数
 	 */
-	public static final int DEFAULT_MAX_CACHE_CAPACITY = 100000;
+	public static final int DEFAULT_MAX_CACHE_CAPACITY = 64;
 	
 	/**
 	 * 默认的文件块大小
