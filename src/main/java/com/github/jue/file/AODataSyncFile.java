@@ -96,7 +96,7 @@ public class AODataSyncFile {
 	/**
 	 * 写文件的策略
 	 */
-	private SyncBuffterStrategy syncStrategy;
+	private SyncStrategy syncStrategy;
 
 	
 	/**
@@ -128,7 +128,7 @@ public class AODataSyncFile {
 		this.dataBufferDArray = new ByteDynamicArray(maxDataBufferSize);
 		this.headerBufferDArray = new ByteDynamicArray(FileHeader.HEADER_SIZE);
 		
-		this.syncStrategy = new SyncBuffterStrategy();
+		this.syncStrategy = new SyncAlwaysStrategy();
 	}
 
 	/**
@@ -172,14 +172,18 @@ public class AODataSyncFile {
 	 * @throws IOException 
 	 */
 	private void writeBufferToFile() throws IOException {
-		ByteBuffer writeDataBuffer = ByteBuffer.wrap(dataBufferDArray.getOrginalBytes(), 0, dataBufferDArray.size());
-		long writePos = fileChannel.size();
-		fileChannel.write(writeDataBuffer, writePos);
-		dataBufferDArray.clear();
+		if (dataBufferDArray.size() > 0) {
+			ByteBuffer writeDataBuffer = ByteBuffer.wrap(dataBufferDArray.getOrginalBytes(), 0, dataBufferDArray.size());
+			long writePos = fileChannel.size();
+			fileChannel.write(writeDataBuffer, writePos);
+			dataBufferDArray.clear();
+		}
 		
-		ByteBuffer writeHeaderBuffer = ByteBuffer.wrap(headerBufferDArray.getOrginalBytes(), 0, headerBufferDArray.size());
-		fileChannel.write(writeHeaderBuffer, 0);
-		headerBufferDArray.clear();
+		if (headerBufferDArray.size() > 0) {
+			ByteBuffer writeHeaderBuffer = ByteBuffer.wrap(headerBufferDArray.getOrginalBytes(), 0, headerBufferDArray.size());
+			fileChannel.write(writeHeaderBuffer, 0);
+			headerBufferDArray.clear();
+		}
 	}
 	
 	/**
@@ -345,12 +349,36 @@ public class AODataSyncFile {
 	}
 	
 	/**
+	 * 数据写入策略接口
+	 * @author noah
+	 *
+	 */
+	public interface SyncStrategy {
+		
+		/**
+		 * 写入数据
+		 * @param newHeaderBuffer
+		 * @param newDataBuffer
+		 * @return
+		 * @throws IOException
+		 */
+		public long append(ByteBuffer newHeaderBuffer, ByteBuffer newDataBuffer) throws IOException;
+		
+		/**
+		 * 关闭文件
+		 * @throws IOException
+		 */
+		public void close() throws IOException;
+	}
+	
+	/**
 	 * 使用缓存策略，当写入数据时，只写入缓存，除非缓存的数据超过最大缓存时候，或者在close的时候，才会写入磁盘
 	 * @author noah
 	 *
 	 */
-	public class SyncBuffterStrategy {
+	public class SyncBuffterStrategy implements SyncStrategy {
 		
+		@Override
 		public long append(ByteBuffer newHeaderBuffer, ByteBuffer newDataBuffer) throws IOException {
 			// 需要写入的数据长度
 			int dataSize = newDataBuffer.remaining();
@@ -365,9 +393,35 @@ public class AODataSyncFile {
 			return writeDataToBuffer(newHeaderBuffer, newDataBuffer);
 		}
 		
+		@Override
 		public void close() throws IOException {
 			writeBufferToFile();
 		}
+	}
+	
+	
+	/**
+	 * 每次写入数据，都直接写入磁盘。
+	 * @author noah
+	 *
+	 */
+	public class SyncAlwaysStrategy implements SyncStrategy {
+		
+		@Override
+		public long append(ByteBuffer newHeaderBuffer, ByteBuffer newDataBuffer) throws IOException {
+			// 需要写入的数据长度
+			int dataSize = newDataBuffer.remaining();
+			if (dataSize > AODataSyncFile.this.maxDataBufferSize) {
+				throw new IllegalArgumentException("The new data size can't be bigger than max data buffer size!");
+			}
+			long pos =  writeDataToBuffer(newHeaderBuffer, newDataBuffer);
+			writeBufferToFile();
+			return pos;
+		}
 
+		@Override
+		public void close() throws IOException {
+			writeBufferToFile();
+		}
 	}
 }

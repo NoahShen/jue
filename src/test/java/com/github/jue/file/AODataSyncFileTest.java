@@ -30,11 +30,11 @@ public class AODataSyncFileTest {
 	@After
 	public void tearDown() throws Exception {
 		aoDataSyncFile.close();
-		File file = new File("/tmp/AODataSyncFile");
-		file.delete();
+//		File file = new File("/tmp/AODataSyncFile");
+//		file.delete();
 	}
 	
-	@Test
+	//@Test
 	public void testWriteData() throws Exception {		
 		byte[] headerBytes = new byte[FileHeader.HEADER_SIZE];
 		for (int i = 0; i < headerBytes.length; ++i) {
