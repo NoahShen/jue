@@ -22,9 +22,7 @@ public class AODataSyncFileTest {
 	@Before
 	public void setUp() throws Exception {
 		File file = new File("/tmp/AODataSyncFile");
-		aoDataSyncFile = new AODataSyncFile(file,
-				AODataSyncFile.DEFAULT_BLOCK_SIZE, true,
-				AODataSyncFile.DEFAULT_MAX_CACHE_CAPACITY, 4096);
+		aoDataSyncFile = new AODataSyncFile(file, AODataSyncFile.BUFFER_STRATEGY);
 	}
 
 	@After
@@ -35,7 +33,7 @@ public class AODataSyncFileTest {
 	}
 	
 	//@Test
-	public void testWriteData() throws Exception {		
+	public void testWriteData() throws Exception {
 		byte[] headerBytes = new byte[FileHeader.HEADER_SIZE];
 		for (int i = 0; i < headerBytes.length; ++i) {
 			headerBytes[i] = 8;

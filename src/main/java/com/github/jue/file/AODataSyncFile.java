@@ -35,7 +35,7 @@ public class AODataSyncFile {
 	/**
 	 * 默认新数据的缓冲区大小
 	 */
-	public static final int DEFAULT_MAX_DATA_BUFFER_SIZE = 512 * 1024 * 1024; //512MB
+	public static final int DEFAULT_MAX_DATA_BUFFER_SIZE = 128 * 1024 * 1024; //128MB
 	
 	/**
 	 * 文件
@@ -94,11 +94,33 @@ public class AODataSyncFile {
 	private final WriteLock writeBufferLock = bufferLock.writeLock();
 	
 	/**
+	 * 每次写数据都先写入缓存
+	 */
+	public static final int BUFFER_STRATEGY = 1;
+	
+	/**
+	 * 每次写入数据都写入到磁盘
+	 */
+	public static final int ALWAYS_STRATEGY = 2;
+	
+	/**
+	 * 每秒将缓存中的数据写入磁盘
+	 */
+	public static final int EVERY_SEC_STRATEGY = 3;
+	/**
 	 * 写文件的策略
 	 */
 	private SyncStrategy syncStrategy;
 
-	
+	/**
+	 * 创建AODataSyncFile
+	 * @param file
+	 * @param syncStrategy
+	 * @throws IOException
+	 */
+	public AODataSyncFile(File file, int syncStrategy) throws IOException {
+		this(file, DEFAULT_BLOCK_SIZE, true, DEFAULT_MAX_CACHE_CAPACITY, DEFAULT_MAX_DATA_BUFFER_SIZE, syncStrategy);
+	}
 	/**
 	 * 创建AODataSyncFile
 	 * @param file
@@ -108,8 +130,7 @@ public class AODataSyncFile {
 	 * @param newDataBufferSize
 	 * @throws IOException
 	 */
-	public AODataSyncFile(File file, int blockSize, boolean blockCache, int maxCacheCapacity, int maxDataBufferSize) throws IOException {
-		super();
+	public AODataSyncFile(File file, int blockSize, boolean blockCache, int maxCacheCapacity, int maxDataBufferSize, int syncStrategy) throws IOException {
 		this.file = file;
 		boolean newFile = !file.exists();
 		@SuppressWarnings("resource")
@@ -128,7 +149,15 @@ public class AODataSyncFile {
 		this.dataBufferDArray = new ByteDynamicArray(maxDataBufferSize);
 		this.headerBufferDArray = new ByteDynamicArray(FileHeader.HEADER_SIZE);
 		
-		this.syncStrategy = new SyncEverySecStrategy();
+		if (syncStrategy == BUFFER_STRATEGY) {
+			this.syncStrategy = new SyncBuffterStrategy();
+		} else if (syncStrategy == ALWAYS_STRATEGY) {
+			this.syncStrategy = new SyncAlwaysStrategy();
+		} else if (syncStrategy == EVERY_SEC_STRATEGY) {
+			this.syncStrategy = new SyncEverySecStrategy();
+		} else {
+			throw new IllegalArgumentException("Invalid strategy!");
+		}
 	}
 
 	/**
