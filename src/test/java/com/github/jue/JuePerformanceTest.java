@@ -8,6 +8,7 @@ import java.io.File;
 import org.junit.Test;
 
 import com.github.jue.doc.DocObject;
+import com.github.jue.file.AODataSyncFile;
 
 /**
  * @author noah
@@ -17,20 +18,21 @@ public class JuePerformanceTest {
 
 	@Test
 	public void testPut() {
-		final int times = 1000;
+		final int times = 10000;
 		
 		String putTestFile = "/tmp/juePutTest.jue";
 		File dataFile = new File(putTestFile);
-		File checkFile = new File(dataFile.getAbsolutePath() + ".bck");
 		if (dataFile.exists()) {
 			dataFile.delete();
-			checkFile.delete();
 		}
 
 		
 		FileConfig config = new FileConfig();
 		config.setKeyTreeMin(64);
 		config.setValueRevTreeMin(64);
+		config.setValueCompressed(false);
+		config.setCacheCapacity(10);
+		config.setDataBufferSize(AODataSyncFile.DEFAULT_MAX_DATA_BUFFER_SIZE);
 		Jue jue = new Jue(putTestFile, config);
 		
 		long startTime = System.currentTimeMillis();
@@ -41,25 +43,26 @@ public class JuePerformanceTest {
 		}
 		long escaped = System.currentTimeMillis() - startTime;
 		System.out.println(String.format("put %d times, escaped: %d, %.2f times/millis", times, escaped, (double)times/(double)escaped));
-		jue.close(true);
+		jue.close();
 	}
 	
 	@Test
 	public void testGet() {
-		final int times = 1000;
+		final int times = 10000;
 		
 		String getTestFile = "/tmp/jueGetTest.jue";
 		File dataFile = new File(getTestFile);
-		File checkFile = new File(dataFile.getAbsolutePath() + ".bck");
 		if (dataFile.exists()) {
 			dataFile.delete();
-			checkFile.delete();
 		}
 
 		
 		FileConfig config = new FileConfig();
 		config.setKeyTreeMin(64);
 		config.setValueRevTreeMin(64);
+		config.setValueCompressed(false);
+		config.setCacheCapacity(10);
+		config.setDataBufferSize(AODataSyncFile.DEFAULT_MAX_DATA_BUFFER_SIZE);
 		Jue jue = new Jue(getTestFile, config);
 		
 
@@ -75,6 +78,6 @@ public class JuePerformanceTest {
 		}
 		long escaped = System.currentTimeMillis() - startTime;
 		System.out.println(String.format("get %d times, escaped: %d, %.2f times/millis", times, escaped, (double)times/(double)escaped));
-		jue.close(true);
+		jue.close();
 	}
 }

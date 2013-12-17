@@ -59,6 +59,11 @@ public class AODataSyncFile {
 	private final boolean blockCache;
 	
 	/**
+	 * 缓存最大值
+	 */
+	private int maxCacheCapacity;
+	
+	/**
 	 * 缓存，使用ByteDynamicArray，而不是ByteBuffer,因为ByteBuffer线程不安全
 	 */
 	private ConcurrentLRUCache<Long, ByteDynamicArray> cache;
@@ -112,6 +117,7 @@ public class AODataSyncFile {
 	 */
 	private SyncStrategy syncStrategy;
 
+
 	/**
 	 * 创建AODataSyncFile
 	 * @param file
@@ -142,6 +148,7 @@ public class AODataSyncFile {
 		this.fileChannel = raf.getChannel();
 		this.blockSize = blockSize;
 		this.blockCache = blockCache;
+		this.maxCacheCapacity = maxCacheCapacity;
 		if (blockCache) {
 			cache = new ConcurrentLRUCache<Long, ByteDynamicArray>(maxCacheCapacity);
 		}
@@ -181,6 +188,12 @@ public class AODataSyncFile {
 		return blockCache;
 	}
 	
+	public int getMaxCacheCapacity() {
+		return maxCacheCapacity;
+	}
+	public int getMaxDataBufferSize() {
+		return maxDataBufferSize;
+	}
 	/**
 	 * 写入数据，返回写入的地址
 	 * @param dataBufferDArray
@@ -225,11 +238,14 @@ public class AODataSyncFile {
 	private long writeDataToBuffer(ByteBuffer newHeaderBuffer, ByteBuffer newDataBuffer) throws IOException {
 		long newDataPos = this.size();
 		int size = newDataBuffer.remaining();
-		this.dataBufferDArray.add(ByteUtil.getBytesFromBuffer(newDataBuffer));
-
+		if (size > 0) {
+			this.dataBufferDArray.add(ByteUtil.getBytesFromBuffer(newDataBuffer));
+		}
 		this.headerBufferDArray = new ByteDynamicArray(ByteUtil.getBytesFromBuffer(newHeaderBuffer));
-
-		clearBlockCache(newDataPos, size);
+		
+		if (size > 0) {
+			clearBlockCache(newDataPos, size);
+		}
 		return newDataPos;
 	}
 	
@@ -282,7 +298,7 @@ public class AODataSyncFile {
 	 */
 	public int read(ByteBuffer readBuffer, long position) throws IOException {
 		if (position < FileHeader.HEADER_SIZE) {
-			throw new IllegalArgumentException("position must >= file header size:" + FileHeader.HEADER_SIZE);
+			throw new IllegalArgumentException("position must >= file header size:" + FileHeader.HEADER_SIZE + " current pos:" + position);
 		}
 		readBufferLock.lock();
 		try	{

@@ -7,6 +7,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import com.github.jue.doc.DocObject;
+import com.github.jue.file.AODataSyncFile;
 
 /**
  * @author noah
@@ -25,6 +26,8 @@ public class JueTest {
 		config.setValueRevTreeMin(10);
 		config.setValueCompressed(true);
 		config.setCompressionType(FileConfig.ZLIB);
+		config.setCacheCapacity(10);
+		config.setDataBufferSize(AODataSyncFile.DEFAULT_MAX_DATA_BUFFER_SIZE);
 		jue = new Jue(testFile, config);
 		
 		//put
@@ -65,7 +68,7 @@ public class JueTest {
 		//compact
 		jue.compact(-1);
 		
-		jue.close(true);
+		jue.close();
 	}
 
 }
