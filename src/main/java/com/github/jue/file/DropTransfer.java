@@ -17,17 +17,17 @@ import com.github.jue.util.ByteUtil;
 public class DropTransfer {
 	
 	/**
-	 * 块读取Channel
+	 * 文件
 	 */
-	private BlockFileChannel blockChannel;
+	private AODataSyncFile aodataSyncFile;
 
 	/**
 	 * 创建一个DropTransfer
-	 * @param blockChannel
+	 * @param aodataSyncFile
 	 */
-	public DropTransfer(BlockFileChannel blockChannel) {
+	public DropTransfer(AODataSyncFile aodataSyncFile) {
 		super();
-		this.blockChannel = blockChannel;
+		this.aodataSyncFile = aodataSyncFile;
 	}
 	
 	/**
@@ -37,7 +37,7 @@ public class DropTransfer {
 	 * @throws IOException
 	 */
 	public ByteBuffer headerToByteBuffer(FileHeader header) {
-		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_LENGHT);		
+		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_SIZE);		
 		
 		buffer.putLong(header.getFileTail());
 		buffer.putInt(header.getKeyTreeMin());
@@ -45,8 +45,10 @@ public class DropTransfer {
 		buffer.put(header.getValueCompressed());
 		buffer.put(header.getCompressionCodec());
 		buffer.putInt(header.getBlockSize());
+		while (buffer.hasRemaining()) {
+			buffer.put((byte) 0);
+		}
 		buffer.flip();
-		
 		return buffer;
 	}
 	
@@ -181,8 +183,8 @@ public class DropTransfer {
 	 * @throws IOException 
 	 */
 	public FileHeader readHeader() throws IOException, ChecksumException {
-		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_LENGHT);
-		blockChannel.read(buffer, 0, true);
+		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_SIZE);
+		aodataSyncFile.read(buffer, 0);
 		buffer.flip();
 		long fileTail = buffer.getLong();
 		int keyTreeMin = buffer.getInt();
@@ -210,7 +212,7 @@ public class DropTransfer {
 	 */
 	public FileTail readTail(long position) throws IOException, ChecksumException {
 		ByteBuffer buffer = ByteBuffer.allocate(FileTail.TAIL_LENGHT);
-		blockChannel.read(buffer, position, true);
+		aodataSyncFile.read(buffer, position);
 		buffer.flip();
 		int revision = buffer.getInt();
 		long rootNode = buffer.getLong();
@@ -238,7 +240,7 @@ public class DropTransfer {
 		// 读取偏移量
 		long offset = position;
 		ByteBuffer buffer = ByteBuffer.allocate(5);
-		blockChannel.read(buffer, offset, true);
+		aodataSyncFile.read(buffer, offset);
 		buffer.flip();
 		offset += buffer.limit();
 		// 是否叶子节点
@@ -249,13 +251,13 @@ public class DropTransfer {
 		ByteBuffer keyLengthBuffer = ByteBuffer.allocate(4);
 		for (int i = 0; i < keyCount; ++i) {
 			// 读取键的长度
-			blockChannel.read(keyLengthBuffer, offset, true);
+			aodataSyncFile.read(keyLengthBuffer, offset);
 			keyLengthBuffer.flip();
 			offset += keyLengthBuffer.limit();
 			int keyLength = keyLengthBuffer.getInt();
 			// 读取键的内容
 			ByteBuffer keyBuffer = ByteBuffer.allocate(keyLength);
-			blockChannel.read(keyBuffer, offset, true);
+			aodataSyncFile.read(keyBuffer, offset);
 			keyBuffer.flip();
 			offset += keyBuffer.limit();
 			keys[i] = keyBuffer.array();
@@ -267,7 +269,7 @@ public class DropTransfer {
 		long[] childOrKeyPos = new long[childLenght];
 		// 子树或者键记录的地址
 		ByteBuffer childPosBuffer = ByteBuffer.allocate(childLenght * 8);
-		blockChannel.read(childPosBuffer, offset, true);
+		aodataSyncFile.read(childPosBuffer, offset);
 		childPosBuffer.flip();
 		for (int j = 0; j < childLenght; ++j) {
 			childOrKeyPos[j] = childPosBuffer.getLong();
@@ -287,7 +289,7 @@ public class DropTransfer {
 		// 读取偏移量
 		long offset = position;
 		ByteBuffer buffer = ByteBuffer.allocate(5);
-		blockChannel.read(buffer, offset, true);
+		aodataSyncFile.read(buffer, offset);
 		buffer.flip();
 		offset += buffer.limit();
 		// 标识符
@@ -297,7 +299,7 @@ public class DropTransfer {
 		// 键的长度 + Value的版本树的根节点 + 当前Key的版本 + 最新版本的Value记录地址
 		int readLength = keyCount + 8 + 4 + 8;
 		ByteBuffer buf = ByteBuffer.allocate(readLength);
-		blockChannel.read(buf, offset, true);
+		aodataSyncFile.read(buf, offset);
 		buf.flip();
 
 		byte[] key = new byte[keyCount];
@@ -321,7 +323,7 @@ public class DropTransfer {
 		// 读取偏移量
 		long offset = position;
 		ByteBuffer buffer = ByteBuffer.allocate(5);
-		blockChannel.read(buffer, offset, true);
+		aodataSyncFile.read(buffer, offset);
 		buffer.flip();
 		offset += buffer.limit();
 		// 是否叶子节点
@@ -330,7 +332,7 @@ public class DropTransfer {
 		int keyCount = buffer.getInt();
 		int[] revisions = new int[keyCount];
 		ByteBuffer revisionsBuffer = ByteBuffer.allocate(keyCount * 4);
-		blockChannel.read(revisionsBuffer, offset, true);
+		aodataSyncFile.read(revisionsBuffer, offset);
 		revisionsBuffer.flip();
 		offset += revisionsBuffer.limit();
 		for (int i = 0; i < keyCount; ++i) {
@@ -341,7 +343,7 @@ public class DropTransfer {
 		long[] childOrKeyPos = new long[childLenght];
 		// 子树或者Value记录的地址
 		ByteBuffer childPosBuffer = ByteBuffer.allocate(childLenght * 8);
-		blockChannel.read(childPosBuffer, offset, true);
+		aodataSyncFile.read(childPosBuffer, offset);
 		childPosBuffer.flip();
 		for (int j = 0; j < childLenght; ++j) {
 			childOrKeyPos[j] = childPosBuffer.getLong();
@@ -361,7 +363,7 @@ public class DropTransfer {
 		// 读取偏移量
 		long offset = position;
 		ByteBuffer buffer = ByteBuffer.allocate(5);
-		blockChannel.read(buffer, offset, true);
+		aodataSyncFile.read(buffer, offset);
 		buffer.flip();
 		offset += buffer.limit();
 		// 标识符
@@ -371,7 +373,7 @@ public class DropTransfer {
 		// Value长度 + 当前Value的版本
 		int readLength = valueLength + 4;
 		ByteBuffer buf = ByteBuffer.allocate(readLength);
-		blockChannel.read(buf, offset, true);
+		aodataSyncFile.read(buf, offset);
 		buf.flip();
 		byte[] value = new byte[valueLength];
 		if (valueLength != 0) {// 数据不为空，或者未被删除，

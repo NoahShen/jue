@@ -26,8 +26,7 @@ import com.github.jue.compression.zlib.ZlibDataCompress;
 import com.github.jue.doc.DocObject;
 import com.github.jue.exception.RevisionInvalidException;
 import com.github.jue.file.ADrop;
-import com.github.jue.file.BlockFileChannel;
-import com.github.jue.file.CRC32ChecksumGenerator;
+import com.github.jue.file.AODataSyncFile;
 import com.github.jue.file.ChecksumException;
 import com.github.jue.file.DropTransfer;
 import com.github.jue.file.FileHeader;
@@ -94,7 +93,7 @@ public class Jue {
 	
 	private DropTransfer dropTransfer;
 	
-	private BlockFileChannel blockFileChannel;
+	private AODataSyncFile aodataSyncFile;
 	
 	private File file;
 	
@@ -159,7 +158,7 @@ public class Jue {
 	 * @throws IOException
 	 */
 	private FileHeader readHeader(File file, FileConfig config) throws IOException {
-		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_LENGHT);
+		ByteBuffer buffer = ByteBuffer.allocate(FileHeader.HEADER_SIZE);
 		FileChannel readChannel = null;
 		try {
 			readChannel = new RandomAccessFile(file, "r").getChannel();
@@ -183,9 +182,13 @@ public class Jue {
 		header.setCompressionCodec(compressionCodec);
 		header.setBlockSize(blockSize);
 		
-		blockFileChannel = new BlockFileChannel(file, header.getBlockSize(), config.isBlockCache(), new CRC32ChecksumGenerator());
-		dropTransfer = new DropTransfer(blockFileChannel);
-		
+		aodataSyncFile = new AODataSyncFile(file, 
+				header.getBlockSize(), 
+				config.isBlockCache(), 
+				config.getCacheCapacity(),
+				config.getDataBufferSize(),
+				AODataSyncFile.BUFFER_STRATEGY);
+		dropTransfer = new DropTransfer(aodataSyncFile);
 		return header;
 	}
 
@@ -252,8 +255,13 @@ public class Jue {
 	 * @throws IOException 
 	 */
 	private FileHeader createEmptyFile(File file, FileConfig config) throws IOException {
-		blockFileChannel = new BlockFileChannel(file, config.getBlockSize(), config.isBlockCache(), new CRC32ChecksumGenerator());
-		dropTransfer = new DropTransfer(blockFileChannel);
+		aodataSyncFile = new AODataSyncFile(file, 
+				config.getBlockSize(), 
+				config.isBlockCache(), 
+				config.getCacheCapacity(),
+				config.getDataBufferSize(),
+				AODataSyncFile.BUFFER_STRATEGY);
+		dropTransfer = new DropTransfer(aodataSyncFile);
 		
 		FileHeader header = new FileHeader();
 		header.setFileTail(-1);
@@ -269,7 +277,9 @@ public class Jue {
 		header.setValueRevTreeMin(config.getValueRevTreeMin());
 		header.setBlockSize(config.getBlockSize());
 		ByteBuffer buffer = dropTransfer.headerToByteBuffer(header);
-		blockFileChannel.write(buffer, 0);
+		ByteBuffer emptyBuffer = ByteBuffer.allocate(1);
+		emptyBuffer.flip();
+		aodataSyncFile.appendData(buffer, emptyBuffer);
 		return header;
 	}
 	
@@ -351,7 +361,7 @@ public class Jue {
 	 */
 	private int putImpl(String key, byte[] keyBytes, DocObject docObj, boolean deleted, int rev) {
 		try {
-			long writePos = blockFileChannel.size();
+			long writePos = aodataSyncFile.size();
 			ByteDynamicArray byteArray = new ByteDynamicArray();
 			// 添加ValueRecord
 			DataCompress compress = null;
@@ -397,7 +407,6 @@ public class Jue {
 			ByteBuffer writeBuffer = ByteBuffer.allocate(byteArray.size());
 			writeBuffer.put(byteArray.toByteArray());
 			writeBuffer.flip();
-			blockFileChannel.write(writeBuffer, writePos);
 			// 更新文件头
 			final FileHeader oldHeader = fileHeader;
 			FileHeader newHeader = new FileHeader(oldHeader.getKeyTreeMin(), oldHeader.getValueRevTreeMin(), 
@@ -405,7 +414,7 @@ public class Jue {
 													oldHeader.getBlockSize());
 			newHeader.setFileTail(tailPos);
 			ByteBuffer headerBuffer = dropTransfer.headerToByteBuffer(newHeader);
-			blockFileChannel.write(headerBuffer, 0);
+			aodataSyncFile.appendData(headerBuffer, writeBuffer);
 			// 更新文件头和文件尾
 			fileTail = tail;
 			fileHeader = newHeader;
@@ -640,18 +649,24 @@ public class Jue {
 		try {
 			lock();
 			FileConfig config = new FileConfig();
-			config.setBlockCache(blockFileChannel.isBlockCache());
-			config.setBlockSize(blockFileChannel.getBlockSize());
+			config.setBlockCache(aodataSyncFile.isBlockCache());
+			config.setBlockSize(aodataSyncFile.getBlockSize());
 			config.setCompressionType(fileHeader.getCompressionCodec());
 			config.setKeyTreeMin(fileHeader.getKeyTreeMin());
 			config.setValueCompressed(fileHeader.getValueCompressed() == FileHeader.TRUE_BYTE);
 			config.setValueRevTreeMin(fileHeader.getValueRevTreeMin());
-			
+			config.setCacheCapacity(aodataSyncFile.getMaxCacheCapacity());
+			config.setDataBufferSize(aodataSyncFile.getMaxDataBufferSize());
 			
 			String fileName = file.getAbsolutePath() + ".cmp";
 			File compactFile = new File(fileName);
-			BlockFileChannel compactBlockChannel = new BlockFileChannel(compactFile, config.getBlockSize(), config.isBlockCache(), new CRC32ChecksumGenerator());
-			DropTransfer compactDropTransfer = new DropTransfer(compactBlockChannel);
+			aodataSyncFile = new AODataSyncFile(compactFile, 
+					config.getBlockSize(), 
+					config.isBlockCache(), 
+					config.getCacheCapacity(),
+					config.getDataBufferSize(),
+					AODataSyncFile.BUFFER_STRATEGY);
+			DropTransfer compactDropTransfer = new DropTransfer(aodataSyncFile);
 			
 			FileHeader compactHeader = new FileHeader();
 			compactHeader.setFileTail(-1);
@@ -666,15 +681,11 @@ public class Jue {
 			compactHeader.setCompressionCodec(compressionCodec);
 			compactHeader.setValueRevTreeMin(config.getValueRevTreeMin());
 			compactHeader.setBlockSize(config.getBlockSize());
-			ByteBuffer buffer = compactDropTransfer.headerToByteBuffer(compactHeader);
-			compactBlockChannel.write(buffer, 0);
-			
-			// 写入位置
-			long realWritePos = FileHeader.HEADER_LENGHT;
-			// 文件元素的写入位置
-			long dropWritePos = FileHeader.HEADER_LENGHT;
+			ByteBuffer headerBuffer = compactDropTransfer.headerToByteBuffer(compactHeader);
+			// 文件中元素的写入位置
+			long dropWritePos = FileHeader.HEADER_SIZE;
 			BPlusTree<String, Long> compactKeyTree = new DefaultBPlusTree<String, Long>(keyTree.getM());
-			ByteDynamicArray dataArray = new ByteDynamicArray();
+			
 			BPlusTree.Entry<String, Long>[] enties = keyTree.entryArray();
 			for (int i = 0; i < enties.length; ++i) {
 				BPlusTree.Entry<String, Long> entry = enties[i];
@@ -690,6 +701,8 @@ public class Jue {
 				if (lastRev > 0) {
 					revs = lastRev;
 				}
+				
+				ByteDynamicArray dataArray = new ByteDynamicArray();
 				
 				BPlusTree<Integer, Long> compactRevTree = new DefaultBPlusTree<Integer, Long>(revTree.getM());
 				long compactLastestValue = -1;
@@ -714,50 +727,44 @@ public class Jue {
 				long compactRevTreePos = compactRevTree.getRootNode().getPosition();
 				dataArray.add(revTreeBytes);
 				dropWritePos += revTreeBytes.length;
-				// 达到缓存大小，写入文件
-				if (dataArray.size() >= COMPACT_BUFFER_SIZE) {
-					compactBlockChannel.write(ByteBuffer.wrap(dataArray.toByteArray()), realWritePos);
-					realWritePos += dataArray.size();
-					// 重置数据数组
-					dataArray = new ByteDynamicArray();
-				}
+
 				KeyRecord compactKeyRecord = new KeyRecord(keyRec.getFlag(), keyRec.getKey(), compactRevTreePos, keyRec.getRevision(), compactLastestValue);
 				byte[] compactKeyRecordBytes = compactDropTransfer.keyRecordToByteBuffer(compactKeyRecord).array();
 				long compactKeyRecordPos = dropWritePos;
 				dataArray.add(compactKeyRecordBytes);
 				compactKeyTree.put(key, compactKeyRecordPos);
 				dropWritePos += compactKeyRecordBytes.length;
+				
+				aodataSyncFile.appendData(headerBuffer, ByteBuffer.wrap(dataArray.toByteArray()));
 			}
+			
+			ByteDynamicArray dataArray2 = new ByteDynamicArray();
 			
 			KeyTreeCallBack keyTreeCallBack = new KeyTreeCallBack(dropWritePos);
 			compactKeyTree.traverseAllNodes(keyTreeCallBack);
 			byte[] keyTreeBytes = keyTreeCallBack.getBytes();
 			long compactKeyTreePos = compactKeyTree.getRootNode().getPosition();
-			dataArray.add(keyTreeBytes);
+			dataArray2.add(keyTreeBytes);
 			dropWritePos += keyTreeBytes.length;
 			
 			FileTail compactFileTail = new FileTail(fileTail.getRevision(), compactKeyTreePos, 
 													fileTail.getAvgKeyLen(), fileTail.getAvgValueLen(), fileTail.getEntryCount());
 			byte[] compactFileTailBytes = compactDropTransfer.tailToByteBuffer(compactFileTail).array();
 			long compactFileTailPos = dropWritePos;
-			dataArray.add(compactFileTailBytes);
+			dataArray2.add(compactFileTailBytes);
 			dropWritePos += compactFileTailBytes.length;
-			compactBlockChannel.write(ByteBuffer.wrap(dataArray.toByteArray()), realWritePos);
-			realWritePos += dataArray.size();
 
 			compactHeader.setFileTail(compactFileTailPos);
 			ByteBuffer compactHeaderbuffer = compactDropTransfer.headerToByteBuffer(compactHeader);
-			compactBlockChannel.write(compactHeaderbuffer, 0);
+			
+			aodataSyncFile.appendData(compactHeaderbuffer, ByteBuffer.wrap(dataArray2.toByteArray()));
+			
 			File oldFile = file;
 			// 写入完毕，关闭文件
 			close();
 			// 删除原文件，修改新文件名
-			File oldChksumFile = new File(BlockFileChannel.getChecksumFilename(oldFile.getAbsolutePath()));
 			oldFile.delete();
-			oldChksumFile.delete();
-			File compactChksumFile = new File(BlockFileChannel.getChecksumFilename(compactFile.getAbsolutePath()));
 			compactFile.renameTo(oldFile);
-			compactChksumFile.renameTo(oldChksumFile);
 			// 重新初始化，打开文件
 			init(oldFile.getCanonicalPath(), config);
 		} catch (Exception e) {
@@ -782,17 +789,8 @@ public class Jue {
 
 	/**
 	 * 关闭文件
-	 * @param deleteFiles
 	 */
 	public void close() {
-		close(false);
-	}
-
-	/**
-	 * 关闭文件，deleteFiles为true，则删除文件
-	 * @param deleteFiles
-	 */
-	public void close(boolean deleteFiles) {
 		lock();
 		try {
 			keyTree = null;
@@ -800,11 +798,8 @@ public class Jue {
 			fileHeader = null;
 			fileTail = null;
 			dropTransfer = null;
-			blockFileChannel.close();
-			if (deleteFiles) {
-				blockFileChannel.deleteFiles();
-			}
-			blockFileChannel = null;
+			aodataSyncFile.close();
+			aodataSyncFile = null;
 			cache.clear();
 			closed = true;
 		} catch (Exception e) {

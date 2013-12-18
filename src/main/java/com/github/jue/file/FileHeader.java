@@ -16,9 +16,9 @@ public class FileHeader implements ADrop {
 	private static final long serialVersionUID = -2193314360648043655L;
 	
 	/**
-	 * FileHeader的长度
+	 * FileHeader的长度，不足部分用0填充
 	 */
-	public static final int HEADER_LENGHT = 22;
+	public static final int HEADER_SIZE = 4096;
 	
 	/**
 	 * 文件尾的位置

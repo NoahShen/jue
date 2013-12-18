@@ -77,6 +77,16 @@ public class FileConfig {
 	private byte compressionType;
 	
 	/**
+	 * 文件块缓存的容量
+	 */
+	private int cacheCapacity;
+	
+	/**
+	 * 文件的缓冲区大小
+	 */
+	private int dataBufferSize;
+	
+	/**
 	 * 使用默认参数创建Config
 	 */
 	public FileConfig() {
@@ -144,4 +154,21 @@ public class FileConfig {
 	public void setCompressionType(byte compressionType) {
 		this.compressionType = compressionType;
 	}
+
+	public int getCacheCapacity() {
+		return cacheCapacity;
+	}
+
+	public void setCacheCapacity(int cacheCapacity) {
+		this.cacheCapacity = cacheCapacity;
+	}
+
+	public int getDataBufferSize() {
+		return dataBufferSize;
+	}
+
+	public void setDataBufferSize(int dataBufferSize) {
+		this.dataBufferSize = dataBufferSize;
+	}
+
 }

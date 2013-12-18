@@ -1,5 +1,6 @@
 package com.github.jue.util;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 /**
@@ -36,6 +37,16 @@ public class ByteDynamicArray {
 			throw new IllegalArgumentException("Negative initial size: " + size);
 		}
 		bytes = new byte[size];
+	}
+	
+	/**
+	 * 使用字节数组创建
+	 * 
+	 * @param size
+	 */
+	public ByteDynamicArray(byte[] bytes) {
+		this.bytes = bytes;
+		this.count = bytes.length;
 	}
 
 	public void add(byte b) {
@@ -77,10 +88,43 @@ public class ByteDynamicArray {
 	}
 
 	/**
+	 * 获取子数组
+	 * @param offset
+	 * @param len
+	 * @return
+	 */
+	public byte[] getSubArray(int offset, int len) {
+		return Arrays.copyOfRange(bytes, offset, offset + len);
+	}
+	
+	/**
+	 * 读取数据到Buffer中
+	 * @param readBuffer
+	 * @param position
+	 * @return
+	 */
+	public int read(ByteBuffer readBuffer, int position) {
+		int count = 0;
+		for (int p = position; readBuffer.hasRemaining() &&  p < size(); ++p) {
+			readBuffer.put(bytes[p]);
+			++count;
+		}
+		return count;
+	}
+	
+	/**
+	 * 获取原始数组对象，如果在某些场景下，避免复制数组造成内存或者资源占用
+	 * @return
+	 */
+	public byte[] getOrginalBytes() {
+		return bytes;
+	}
+	
+	/**
 	 * 返回数组
 	 * @return
 	 */
-	public byte toByteArray()[] {
+	public byte[] toByteArray() {
 		return Arrays.copyOf(bytes, count);
 	}
 
